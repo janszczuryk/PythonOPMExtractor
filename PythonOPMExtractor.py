@@ -39,7 +39,7 @@ from enum import IntEnum
 from collections import OrderedDict
 from typing import Final
 
-VERSION: Final[str] = 'v1.0.0'
+VERSION: Final[str] = 'v1.0.1'
 
 class OPMExtractor:
 
@@ -64,7 +64,9 @@ class OPMExtractor:
     saved_package_files: list = None
     saved_package_sopm: str = None
 
-    def __init__(self, input_file, output_path,
+    def __init__(self,
+                input_file: str,
+                output_path: str,
                 exception_mode: ExceptionMode = ExceptionMode.PRINT_STDERR,
                 message_mode: MessageMode = MessageMode.PRINT_STDOUT) -> None:
         self.input_file = input_file
@@ -77,30 +79,33 @@ class OPMExtractor:
     """
     def handle_exception(self, exception: BaseException) -> None:
         if self.exception_mode is self.ExceptionMode.PRINT_STDERR:
-            self.handle_exception_print_stderr(exception)
+            self._handle_exception_print_stderr(exception)
         elif self.exception_mode is self.ExceptionMode.RAISE:
-            self.handle_exception_raise(exception)
+            self._handle_exception_raise(exception)
         elif self.exception_mode is self.ExceptionMode.PRINT_AND_RAISE:
-            self.handle_exception_print_stderr(exception)
-            self.handle_exception_raise(exception)
+            self._handle_exception_print_stderr(exception)
+            self._handle_exception_raise(exception)
 
-    def handle_exception_print_stderr(self, exception: BaseException) -> None:
+    def _handle_exception_print_stderr(self, exception: BaseException) -> None:
         print(f"{exception}", file=sys.stderr)
 
-    def handle_exception_raise(self, exception: BaseException) -> None:
+    def _handle_exception_raise(self, exception: BaseException) -> None:
         raise exception
 
     def handle_message(self, message: str) -> None:
         if self.message_mode is self.MessageMode.PRINT_STDOUT:
-            self.handle_message_print_stdout(message)
+            self._handle_message_print_stdout(message)
         elif self.message_mode is self.MessageMode.NO_PRINT:
             pass
 
-    def handle_message_print_stdout(self, message: str):
+    def _handle_message_print_stdout(self, message: str) -> None:
         print(f"{message}", file=sys.stdout)
 
     """ 
         Main features:
+        - load_input()
+        - extract_package_files()
+        - extract_package_sopm()
     """
     def load_input(self) -> None:
         try:
@@ -133,6 +138,10 @@ class OPMExtractor:
     def _extract_from_file_tag(self, file_tag: ET.Element) -> None:
         if file_tag.tag != 'File':
             raise self.OPMExtractorError(f"Tag is supposed to be named 'File'!")
+
+        if file_tag.get('Permission', default=None) is None \
+            or file_tag.get('Location', default=None) is None:
+            raise OPMExtractorError(f"Tag 'File' is supposed to have 'Permission' and 'Location' attributes!")
 
         tag_encoding = file_tag.get('Encode', default=None)
         if tag_encoding != 'Base64':
@@ -169,10 +178,10 @@ class OPMExtractor:
             f.write(file_data)
             f.close()
 
-    def _set_file_permissions(self, path: str , permissions: int):
+    def _set_file_permissions(self, path: str, permissions: int) -> None:
         os.chmod(path, permissions)
 
-    def extract_package_sopm(self):
+    def extract_package_sopm(self) -> None:
         try:
             tags_all = self._get_package_tag_names()
             
@@ -180,7 +189,7 @@ class OPMExtractor:
 
             tag_name = self.loaded_package_root.find('./Name')
             if tag_name is None:
-                raise self.OPMExtractorError(f"Tag 'Name' is suppost to exist!")
+                raise self.OPMExtractorError(f"Tag 'Name' is supposed to exist!")
 
             sopm_file_location = os.path.join(self.output_path, f"{tag_name.text}.sopm")
 
@@ -206,7 +215,8 @@ class OPMExtractor:
             'BuildHost',
         ]
         for tag in tags_to_exclude:
-            tags_all.remove(tag)
+            if tag in tags_all:
+                tags_all.remove(tag)
 
         return tags_all
 
@@ -236,7 +246,8 @@ class OPMExtractor:
 
         return ET.ElementTree(xml_root)
 
-    def _add_xml_tag(self, tree_builder: ET.TreeBuilder, tag: ET.Element, parent: ET.Element = None) -> None:
+    def _add_xml_tag(self, tree_builder: ET.TreeBuilder, tag: ET.Element,
+            parent: ET.Element = None) -> None:
         new_tag = None
 
         if parent is None:    
@@ -253,7 +264,7 @@ class OPMExtractor:
             for subtag in subtags:
                 self._add_xml_tag(tree_builder, subtag, new_tag)
 
-    def _write_xml_root(self, path, xml_root: ET.ElementTree) -> None:
+    def _write_xml_root(self, path: str, xml_root: ET.ElementTree) -> None:
         # Format XML with tabs
         ET.indent(xml_root, space="\t", level=0)
 
