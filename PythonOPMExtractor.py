@@ -39,8 +39,6 @@ from enum import IntEnum
 from collections import OrderedDict
 from typing import Final
 
-VERSION: Final[str] = 'v1.0.1'
-
 class OPMExtractor:
 
     class OPMExtractorError(Exception):
@@ -58,6 +56,7 @@ class OPMExtractor:
 
     exception_mode: ExceptionMode = None
     message_mode: MessageMode = None
+    indentation: str = "\t"
     input_file: str = None
     output_path: str = None
     loaded_package_root: ET.Element = None
@@ -68,11 +67,13 @@ class OPMExtractor:
                 input_file: str,
                 output_path: str,
                 exception_mode: ExceptionMode = ExceptionMode.PRINT_STDERR,
-                message_mode: MessageMode = MessageMode.PRINT_STDOUT) -> None:
+                message_mode: MessageMode = MessageMode.PRINT_STDOUT,
+                indentation: str = "\t") -> None:
         self.input_file = input_file
         self.output_path = output_path
         self.exception_mode = exception_mode
         self.message_mode = message_mode
+        self.indentation = indentation
 
     """ 
         Handlers:
@@ -102,11 +103,31 @@ class OPMExtractor:
         print(f"{message}", file=sys.stdout)
 
     """ 
-        Main features:
+        Public interface:
+        - set_configuration()
         - load_input()
         - extract_package_files()
         - extract_package_sopm()
     """
+
+    """ START set_configuration """
+    def set_configuration(self, configuration: dict) -> None:
+        configurable = [
+            'exception_mode',
+            'message_mode',
+            'indentation'
+        ]
+
+        for name in configurable:
+            if name not in configuration:
+                continue
+            if not isinstance(configuration[name], type(getattr(self, name))):
+                continue
+            
+            setattr(self, name, configuration[name])
+    """ END set_configuration """
+
+    """ START load_input """
     def load_input(self) -> None:
         try:
             package_tree = ET.parse(self.input_file)
@@ -119,7 +140,9 @@ class OPMExtractor:
             raise err
         else:
             self.handle_message(f"File '{self.input_file}' loaded!")
-    
+    """ END load_input """
+
+    """ START extract_package_files """
     def extract_package_files(self) -> None:
         try: 
             self.saved_package_files = list()
@@ -141,7 +164,7 @@ class OPMExtractor:
 
         if file_tag.get('Permission', default=None) is None \
             or file_tag.get('Location', default=None) is None:
-            raise OPMExtractorError(f"Tag 'File' is supposed to have 'Permission' and 'Location' attributes!")
+            raise self.OPMExtractorError(f"Tag 'File' is supposed to have 'Permission' and 'Location' attributes!")
 
         tag_encoding = file_tag.get('Encode', default=None)
         if tag_encoding != 'Base64':
@@ -180,7 +203,9 @@ class OPMExtractor:
 
     def _set_file_permissions(self, path: str, permissions: int) -> None:
         os.chmod(path, permissions)
+    """ END extract_package_files """
 
+    """ START extract_package_sopm """
     def extract_package_sopm(self) -> None:
         try:
             tags_all = self._get_package_tag_names()
@@ -238,10 +263,8 @@ class OPMExtractor:
             tag_filelist.clear()
 
             for tag_attrib in self.saved_package_files:
-                new_attrib = {
-                    'Permission': tag_attrib['Permission'],
-                    'Location': tag_attrib['Location'],
-                }
+                new_attrib = tag_attrib
+                del new_attrib['Encode']
                 tag_filelist.append(ET.Element('File', attrib=new_attrib))
 
         return ET.ElementTree(xml_root)
@@ -266,37 +289,107 @@ class OPMExtractor:
 
     def _write_xml_root(self, path: str, xml_root: ET.ElementTree) -> None:
         # Format XML with tabs
-        ET.indent(xml_root, space="\t", level=0)
+        ET.indent(xml_root, space=self.indentation, level=0)
 
         xml_root.write(path,
                         encoding='UTF-8', xml_declaration=True,
                         method='xml', short_empty_elements=True)
+    """ END extract_package_sopm """
 
-def main():
-    if (len(sys.argv) == 2) \
-        and (sys.argv[1] == '-h' or sys.argv[1] == '--help'):
-        printUsage()  
+"""
+    Wrapper for OPMExtractor class
+"""
 
-    if len(sys.argv) != 3:
-        printUsage()
+class Program:
+    """ Constants """
+    NAME: Final[str] = 'PythonOPMExtractor'
+    VERSION: Final[str] = 'v1.1.0-pre1'
+
+    """ Config Variables """
+    config = {
+        'exception_mode': OPMExtractor.ExceptionMode.PRINT_STDERR,
+        'message_mode': OPMExtractor.MessageMode.PRINT_STDOUT,
+        'indentation': "\t",
+    }
+
+    arguments: list = list()
+    input_file: str = ''
+    output_path: str = ''
+    is_quiet: bool = False
+
+    def __init__(self, arguments) -> None:
+        self.arguments = arguments
+
+    """ Entrypoint for the program """
+    def main(self) -> None:
+
+        self.handleArguments(self.arguments)
+
+        if not self.is_quiet:
+            print(f".:: {self.NAME} {self.VERSION} ::.")
+
+        extractor = OPMExtractor(self.input_file, self.output_path)
+
+        if self.is_quiet:
+            self.config['message_mode'] = OPMExtractor.MessageMode.NO_PRINT
+
+        extractor.set_configuration(self.config)
+
+        extractor.load_input()
+        extractor.extract_package_files()
+        extractor.extract_package_sopm()
         
-    input_file = str(sys.argv[1])
-    output_path = str(sys.argv[2])
+        if not self.is_quiet:
+            print(f"Done!")
 
-    print(f".:: PythonOPMExtractor {VERSION} ::.")
+    def handleArguments(self, arguments: list) -> None:
+        arguments_count = len(arguments)
 
-    extractor = OPMExtractor(input_file, output_path)
+        if arguments_count >= 2:
+            self._handleArguments2(arguments)
 
-    extractor.load_input()
-    extractor.extract_package_files()
-    extractor.extract_package_sopm()
-    
-    print(f"Done!")
+        handle_arguments = {
+            3: self._handleArguments3,
+            4: self._handleArguments4,
+        }        
 
-def printUsage():
-    print("Usage:")
-    print(f"{sys.argv[0]} <opm file> <output directory>\n")
-    exit(0)
+        handler = handle_arguments[arguments_count]
+        if handler:
+            handler(arguments)
+        else:
+            self.printUsage()
+            exit(0)
+        
+    def _handleArguments2(self, arguments: list):
+        if (arguments[1] == '-h' or arguments[1] == '--help'):
+            self.printUsage()
+            exit(0)
+        if (arguments[1] == '-v' or arguments[1] == '--version'):
+            self.printVersion()
+            exit(0)
+
+    def _handleArguments3(self, arguments: list):
+        self.input_file = str(arguments[1])
+        self.output_path = str(arguments[2])
+
+    def _handleArguments4(self, arguments: list):
+        if (arguments[1] == '-q' or arguments[1] == '--quiet'):
+            self.input_file = str(arguments[2])
+            self.output_path = str(arguments[3])
+            self.is_quiet = True
+
+    def printUsage(self) -> None:
+        usage = f"""Usage: {self.arguments[0]} [options] <opm file> <output directory>
+
+    Options:
+        -h, --help              shows this help message and exit
+        -v, --version           shows program version and exit
+        -q, --quiet             runs program in quiet mode and suppresses messages"""
+        print(usage)
+
+    def printVersion(self) -> None:
+        print(f"{self.NAME} {self.VERSION}")
 
 if __name__ == '__main__':
-    main()
+    program = Program(sys.argv)
+    program.main()
